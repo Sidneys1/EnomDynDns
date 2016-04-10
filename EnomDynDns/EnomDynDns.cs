@@ -1,39 +1,55 @@
-﻿using System.ServiceProcess;
+﻿using System;
+using System.Configuration;
+using System.Diagnostics;
+using System.ServiceProcess;
 
 namespace EnomDynDns
 {
     public partial class EnomDynDns : ServiceBase
     {
-        private System.Timers.Timer _timer;
+        private readonly System.Timers.Timer _timer;
 
         public EnomDynDns()
         {
             InitializeComponent();
-            if (!System.Diagnostics.EventLog.SourceExists("EnomDynDns"))
+            if (!EventLog.SourceExists("EnomDynDns"))
             {
-                System.Diagnostics.EventLog.CreateEventSource(
+                EventLog.CreateEventSource(
                     "EnomDynDns", "EnomDynDnsLog");
             }
             eventLog1.Source = "EnomDynDns";
             eventLog1.Log = "EnomDynDnsLog";
+            
+            long timel;
+            _timer = new System.Timers.Timer(long.TryParse(GetAppSetting("UpdateFrequency"), out timel) ? timel : 3600000);
+            _timer.Elapsed += timer_Elapsed;
+
+            CanPauseAndContinue = true;
         }
 
-        protected override void OnStart(string[] args)
+        protected override async void OnStart(string[] args)
         {
             eventLog1.WriteEntry("EnomDynDns Starting...");
-
-            Dns.Update();
-
-            _timer = new System.Timers.Timer(300);
-            _timer.Elapsed += timer_Elapsed;
+            Dns.Init();
+			var res = await Dns.Update();
+            if (!res.IsSuccessStatusCode) {
+                eventLog1.WriteEntry($"Initial update failed: {res.Content}", EventLogEntryType.Error);
+                ExitCode = 1;
+                Stop();
+            }
             _timer.Enabled = true;
-
+            eventLog1.WriteEntry("Initial update succeeded...");
             eventLog1.WriteEntry("EnomDynDns Started...");
         }
 
-        private void timer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
-        {
-            Dns.Update();
+        private async void timer_Elapsed(object sender, System.Timers.ElapsedEventArgs e) {
+            try {
+				var resp = await Dns.Update();
+				eventLog1.WriteEntry($"Server update {(resp.IsSuccessStatusCode ? "succeeded" : $"failed: {resp.Content}")}");
+            }
+            catch (Exception exception) {
+                eventLog1.WriteEntry(exception.Message, EventLogEntryType.Error);
+            }
         }
 
         protected override void OnStop()
@@ -54,9 +70,21 @@ namespace EnomDynDns
         protected override void OnPause()
         {
             eventLog1.WriteEntry("EnomDynDns Pausing...");
-            base.OnContinue();
-            _timer.Enabled = true;
+            base.OnPause();
+            _timer.Enabled = false;
             eventLog1.WriteEntry("EnomDynDns Paused...");
+        }
+
+        private static string GetAppSetting(string key) {
+            try {
+                var setting = ConfigurationManager.AppSettings[key];
+                if (string.IsNullOrEmpty(setting))
+                    throw new ArgumentNullException($"{key} AppSetting may not be missing, null, nor empty.");
+                return setting;
+            }
+            catch (Exception e) {
+                return null;
+            }
         }
     }
 }

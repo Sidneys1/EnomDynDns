@@ -1,32 +1,32 @@
 ﻿using System;
 using System.Configuration;
 using System.Net.Http;
+using System.Threading.Tasks;
 
 namespace EnomDynDns
 {
     public static class Dns
     {
-        public static void Update()
-        {
-            var host = GetAppSetting("host");
-            var zone = GetAppSetting("zone");
-            var password = GetAppSetting("domainPassword");
-            var enomServer = GetAppSetting("enomServer");
+        private static readonly HttpClient HttpClient = new HttpClient();
+        private static Uri _uri;
 
-            var httpClient = new HttpClient();
-            httpClient.GetAsync(new Uri(string.Format(enomServer, host, zone, password))).ContinueWith(
-                (requestTask) =>
-                {
-                    var response = requestTask.Result;
-                    response.EnsureSuccessStatusCode();
-                });
+        public static void Init() {
+            _uri = new Uri(string.Format(
+                GetAppSetting("enomServer"), 
+                GetAppSetting("host"), 
+                GetAppSetting("zone"), 
+                GetAppSetting("domainPassword")
+            ));
         }
+
+        public static async Task<HttpResponseMessage> Update() 
+            => await HttpClient.GetAsync(_uri);
 
         private static string GetAppSetting(string key)
         {
             var setting = ConfigurationManager.AppSettings[key];
             if(string.IsNullOrEmpty(setting))
-                throw new ArgumentNullException(string.Format("{0} AppSetting may not be missing, null, nor empty.", key));
+                throw new ArgumentNullException($"{key} AppSetting may not be missing, null, nor empty.");
             return setting;
         }
     }
